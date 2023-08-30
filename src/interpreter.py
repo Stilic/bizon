@@ -6,16 +6,6 @@ from enum import Enum
 def make_error(message, line, col):
     return Exception(f"{message} [{line}:{col}]")
 
-
-class Position:
-    def __init__(self, line, col):
-        self.line = line
-        self.col = col
-
-    def __repr__(self):
-        return f"{self.line}:{self.col}"
-
-
 # TOKENS
 
 
@@ -32,15 +22,21 @@ class TokenType(Enum):
 
 
 class Token:
-    def __init__(self, type, value=None, start_pos=None, end_pos=None):
+    def __init__(self, type, value=None, start_pos_line=None, start_pos_col=None,  end_pos_line=None, end_pos_col=None):
         self.type = type
         self.value = value
 
-        self.start_pos = start_pos
-        if end_pos:
-            self.end_pos = end_pos
+        self.start_pos_line = start_pos_line
+        self.start_pos_col = start_pos_col
+
+        if end_pos_line:
+            self.end_pos_line = end_pos_line
         else:
-            self.end_pos = start_pos
+            self.end_pos_line = start_pos_line
+        if end_pos_col:
+            self.end_pos_col = end_pos_col
+        else:
+            self.end_pos_col = start_pos_col
 
     def __repr__(self):
         if self.value:
@@ -65,7 +61,7 @@ class Lexer:
         self.pos = -1
 
     def make_token(self, type, value=None):
-        return Token(type, value, Position(self.line, self.col))
+        return Token(type, value, self.line, self.col)
 
     def advance(self):
         if self.pos + 1 < len(self.code):
@@ -83,7 +79,8 @@ class Lexer:
     def check_current_pos(self):
         if _check_character(self.code[self.pos]):
             if self.code[self.pos].isdigit():
-                start_pos = Position(self.line, self.col)
+                start_pos_line = self.line
+                start_pos_col = self.col
                 num = str(self.code[self.pos])
                 is_float = False
                 while self.advance():
@@ -95,14 +92,13 @@ class Lexer:
                     else:
                         self.pos -= 1
                         break
-                end_pos = Position(self.line, self.col)
                 if is_float:
                     self.tokens.append(
-                        Token(TokenType.FLOAT, float(num), start_pos, end_pos)
+                        Token(TokenType.FLOAT, float(num), start_pos_line, start_pos_col, self.line, self.col)
                     )
                 else:
                     self.tokens.append(
-                        Token(TokenType.INT, int(num), start_pos, end_pos)
+                        Token(TokenType.INT, int(num), start_pos_line, start_pos_col, self.line, self.col)
                     )
             elif self.code[self.pos] == "+":
                 self.tokens.append(self.make_token(TokenType.PLUS))
@@ -191,10 +187,10 @@ class Parser:
             if self.tokens[self.pos].type == TokenType.RPAREN:
                 self.advance()
                 return expr
-            else:
-                raise make_error(
-                    "Unmatched (", token.start_pos.line, token.start_pos.col
-                )
+            # else:
+            #     raise make_error(
+            #         "Unmatched (", token.start_pos.line, token.start_pos.col
+            #     )
 
     def bin_op(self, func, ops):
         left = func()
@@ -234,4 +230,4 @@ def run(code):
     print(ast)
 
 
-run("1.23 + 48 * 85 + (85 + 45)")
+run("1.23 + 48 * 85 + ((85 + 45)")
