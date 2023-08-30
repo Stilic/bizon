@@ -1,5 +1,21 @@
 from enum import Enum
 
+# HELPERS
+
+
+def make_error(message, line, col):
+    return Exception(f"{message} [{line}:{col}]")
+
+
+class Position:
+    def __init__(self, line, col):
+        self.line = line
+        self.col = col
+
+    def __repr__(self):
+        return f"{self.line}:{self.col}"
+
+
 # TOKENS
 
 
@@ -16,9 +32,15 @@ class TokenType(Enum):
 
 
 class Token:
-    def __init__(self, type, value=None):
+    def __init__(self, type, value=None, start_pos=None, end_pos=None):
         self.type = type
         self.value = value
+
+        self.start_pos = start_pos
+        if end_pos:
+            self.end_pos = end_pos
+        else:
+            self.end_pos = start_pos
 
     def __repr__(self):
         if self.value:
@@ -37,6 +59,14 @@ class Lexer:
     def __init__(self, code: str):
         self.code = code
 
+        self.line = 0
+        self.col = 0
+
+        self.pos = -1
+
+    def make_token(self, type, value=None):
+        return Token(type, value, Position(self.line, self.col))
+
     def advance(self):
         if self.pos + 1 < len(self.code):
             if self.code[self.pos] == "\n":
@@ -53,55 +83,48 @@ class Lexer:
     def check_current_pos(self):
         if _check_character(self.code[self.pos]):
             if self.code[self.pos].isdigit():
-                num = self.code[self.pos]
+                start_pos = Position(self.line, self.col)
+                num = str(self.code[self.pos])
                 is_float = False
-                check_next_token = False
-                if self.advance():
-                    while self.pos < len(self.code):
-                        if self.code[self.pos] == ".":
-                            if is_float:
-                                continue
-                            else:
-                                num += "."
-                                is_float = True
-                            self.advance()
-                        elif self.code[self.pos].isdigit():
-                            num += self.code[self.pos]
-                            self.advance()
-                        else:
-                            check_next_token = True
-                            break
-                    if is_float:
-                        self.tokens.append(Token(TokenType.FLOAT, float(num)))
+                while self.advance():
+                    if self.code[self.pos].isdigit():
+                        num += self.code[self.pos]
+                    elif self.code[self.pos] == ".":
+                        num += "."
+                        is_float = True
                     else:
-                        self.tokens.append(Token(TokenType.INT, int(num)))
-                    if check_next_token:
-                        self.check_current_pos()
+                        self.pos -= 1
+                        break
+                end_pos = Position(self.line, self.col)
+                if is_float:
+                    self.tokens.append(
+                        Token(TokenType.FLOAT, float(num), start_pos, end_pos)
+                    )
+                else:
+                    self.tokens.append(
+                        Token(TokenType.INT, int(num), start_pos, end_pos)
+                    )
             elif self.code[self.pos] == "+":
-                self.tokens.append(Token(TokenType.PLUS))
+                self.tokens.append(self.make_token(TokenType.PLUS))
             elif self.code[self.pos] == "-":
-                self.tokens.append(Token(TokenType.MINUS))
+                self.tokens.append(self.make_token(TokenType.MINUS))
             elif self.code[self.pos] == "*":
-                self.tokens.append(Token(TokenType.MULT))
+                self.tokens.append(self.make_token(TokenType.MULT))
             elif self.code[self.pos] == "/":
-                self.tokens.append(Token(TokenType.DIV))
+                self.tokens.append(self.make_token(TokenType.DIV))
             elif self.code[self.pos] == "=":
-                self.tokens.append(Token(TokenType.EQUAL))
+                self.tokens.append(self.make_token(TokenType.EQUAL))
             elif self.code[self.pos] == "(":
-                self.tokens.append(Token(TokenType.LPAREN))
+                self.tokens.append(self.make_token(TokenType.LPAREN))
             elif self.code[self.pos] == ")":
-                self.tokens.append(Token(TokenType.RPAREN))
+                self.tokens.append(self.make_token(TokenType.RPAREN))
             else:
-                raise Exception(
-                    f"Illegal character at {self.line}:{self.col} ({self.code[self.pos]})"
+                raise make_error(
+                    f"Illegal character: {self.code[self.pos]}", self.line, self.col
                 )
 
     def tokenize(self):
-        self.line = 0
-        self.col = 0
-
         self.tokens = []
-        self.pos = -1
 
         while self.advance():
             self.check_current_pos()
@@ -128,7 +151,16 @@ class BinOpNode(Node):
         self.right_node = right_node
 
     def __repr__(self):
-        return f"{self.left_node}, {Node.__repr__(self)}, {self.right_node}"
+        return f"({self.left_node}, {Node.__repr__(self)}, {self.right_node})"
+
+
+class UnaryOpNode(Node):
+    def __init__(self, token, node):
+        Node.__init__(self, token)
+        self.node = node
+
+    def __repr__(self):
+        return f"({Node.__repr__(self)}, {self.node})"
 
 
 # PARSER
@@ -144,33 +176,49 @@ class Parser:
             return True
         return False
 
+    def factor(self):
+        token = self.tokens[self.pos]
+
+        if token.type in (TokenType.PLUS, TokenType.MINUS):
+            self.advance()
+            return UnaryOpNode(token, self.factor())
+        elif token.type in (TokenType.INT, TokenType.FLOAT):
+            self.advance()
+            return Node(token)
+        elif token.type == TokenType.LPAREN:
+            self.advance()
+            expr = self.expr()
+            if self.tokens[self.pos].type == TokenType.RPAREN:
+                self.advance()
+                return expr
+            else:
+                raise make_error(
+                    "Unmatched (", token.start_pos.line, token.start_pos.col
+                )
+
+    def bin_op(self, func, ops):
+        left = func()
+
+        while self.tokens[self.pos].type in ops:
+            op_token = self.tokens[self.pos]
+            self.advance()
+            left = BinOpNode(left, op_token, func())
+
+        return left
+
+    def term(self):
+        return self.bin_op(self.factor, (TokenType.MULT, TokenType.DIV))
+
+    def expr(self):
+        return self.bin_op(self.term, (TokenType.PLUS, TokenType.MINUS))
+
     def parse(self):
-        self.ast = []
-        self.pos = -1
+        self.line = 0
+        self.col = 0
 
-        self.groups = [self.ast]
+        self.pos = 0
 
-        while self.advance():
-            token = self.tokens[self.pos]
-            # TODO: redo the group parsing
-            if token.type == TokenType.LPAREN:
-                node = Node([])
-
-                previous_node = self.groups[0][-1] if len(self.groups[0]) > 0 else None                
-                print(previous_node)
-                if type(previous_node) == BinOpNode:
-                    previous_node.right_node = node
-                else:
-                    node.token.append(previous_node)
-                    self.groups[0].append(node)
-
-                self.groups.insert(0, node.token)
-            elif token.type == TokenType.RPAREN:
-                self.groups.pop(0)
-            elif self.is_operator(token.type):
-                self.groups[0].append(BinOpNode(Node(self.tokens[self.pos - 1]), token, Node(self.tokens[self.pos + 1])))
-
-        return self.ast
+        return self.expr()
 
 
 # RUN
@@ -186,4 +234,4 @@ def run(code):
     print(ast)
 
 
-run("(1.17) + 9 * (8 + 7)")
+run("1.23 + 48 * 85 + (85 + 45)")
