@@ -6,6 +6,7 @@ from enum import Enum
 def make_error(message, line, col):
     return Exception(f"{message} [{line}:{col}]")
 
+
 # TOKENS
 
 
@@ -19,10 +20,19 @@ class TokenType(Enum):
     EQUAL = "EQUAL"
     LPAREN = "LPAREN"
     RPAREN = "RPAREN"
+    EOF = "EOF"
 
 
 class Token:
-    def __init__(self, type, value=None, start_pos_line=None, start_pos_col=None,  end_pos_line=None, end_pos_col=None):
+    def __init__(
+        self,
+        type,
+        value=None,
+        start_pos_line=None,
+        start_pos_col=None,
+        end_pos_line=None,
+        end_pos_col=None,
+    ):
         self.type = type
         self.value = value
 
@@ -78,7 +88,7 @@ class Lexer:
 
     def check_current_pos(self):
         if _check_character(self.code[self.pos]):
-            if self.code[self.pos].isdigit():
+            if self.code[self.pos].isdigit() or self.code[self.pos] == "-":
                 start_pos_line = self.line
                 start_pos_col = self.col
                 num = str(self.code[self.pos])
@@ -92,18 +102,32 @@ class Lexer:
                     else:
                         self.pos -= 1
                         break
-                if is_float:
+                if num == "-":
+                    self.tokens.append(self.make_token(TokenType.MINUS))
+                elif is_float:
                     self.tokens.append(
-                        Token(TokenType.FLOAT, float(num), start_pos_line, start_pos_col, self.line, self.col)
+                        Token(
+                            TokenType.FLOAT,
+                            float(num),
+                            start_pos_line,
+                            start_pos_col,
+                            self.line,
+                            self.col,
+                        )
                     )
                 else:
                     self.tokens.append(
-                        Token(TokenType.INT, int(num), start_pos_line, start_pos_col, self.line, self.col)
+                        Token(
+                            TokenType.INT,
+                            int(num),
+                            start_pos_line,
+                            start_pos_col,
+                            self.line,
+                            self.col,
+                        )
                     )
             elif self.code[self.pos] == "+":
                 self.tokens.append(self.make_token(TokenType.PLUS))
-            elif self.code[self.pos] == "-":
-                self.tokens.append(self.make_token(TokenType.MINUS))
             elif self.code[self.pos] == "*":
                 self.tokens.append(self.make_token(TokenType.MULT))
             elif self.code[self.pos] == "/":
@@ -124,6 +148,8 @@ class Lexer:
 
         while self.advance():
             self.check_current_pos()
+
+        self.tokens.append(self.make_token(TokenType.EOF))
 
         return self.tokens
 
@@ -184,13 +210,14 @@ class Parser:
         elif token.type == TokenType.LPAREN:
             self.advance()
             expr = self.expr()
-            if self.tokens[self.pos].type == TokenType.RPAREN:
+            token = self.tokens[self.pos]
+            if token.type == TokenType.RPAREN:
                 self.advance()
                 return expr
-            # else:
-            #     raise make_error(
-            #         "Unmatched (", token.start_pos.line, token.start_pos.col
-            #     )
+            else:
+                raise make_error(
+                    "Expected )", token.start_pos_line, token.start_pos_col
+                )
 
     def bin_op(self, func, ops):
         left = func()
@@ -214,7 +241,19 @@ class Parser:
 
         self.pos = 0
 
-        return self.expr()
+        expr = self.expr()
+
+        token = self.tokens[self.pos]
+        if token.type != TokenType.EOF:
+            raise make_error(
+                "Unexpected ')'"
+                if token.type == TokenType.RPAREN
+                else "Expected '+', '-', '*' or '/'",
+                token.start_pos_line,
+                token.start_pos_col,
+            )
+
+        return expr
 
 
 # RUN
@@ -230,4 +269,4 @@ def run(code):
     print(ast)
 
 
-run("1.23 + 48 * 85 + ((85 + 45)")
+run("-8 - 2.3")
